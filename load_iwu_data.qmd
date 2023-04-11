@@ -1,0 +1,244 @@
+---
+title: "Combine Irrigation Data"
+author: "Mark Barrett"
+format: html
+---
+
+# Libraries
+
+```{r}
+library(tidyverse)
+library(here)
+library(skimr)
+```
+# Data
+
+Downloaded all files from the [Illinois Data Bank](https://doi.org/10.13012/B2IDB-4607538_V1).
+Select all files, click *Get Custom Zip and Download Link for Selected*, unzip the file and copy all the csv files into a folder named `data`. I put the files in a subfolder named `raw` because I expect I will want to output a processed file and it's useful to differentiate earlier on. 
+
+```{r}
+data_folder = here("data", "raw")
+(data_files = list.files(data_folder, full.names = T))
+```
+
+## Load
+
+Read one file in for each data type.
+
+According to the readme:
+
+>All csv files in this folder specify the type of water: where GWA is Groundwater Abstractions, GWD is Groundwater Depletion, and SW is Surface water Withdrawals; followed by the year, ranging from 2008 to 2020. 
+
+```{r}
+gwa_example = str_subset(data_files, "gwa") |> 
+  sample(1) |> 
+  read_csv()
+
+glimpse(gwa_example)
+```
+
+```{r}
+gwd_example = str_subset(data_files, "gwd") |> 
+  sample(1) |> 
+  read_csv()
+
+glimpse(gwd_example)
+```
+
+```{r}
+sw_example = str_subset(data_files, "sw") |> 
+  sample(1) |> 
+  read_csv()
+
+glimpse(sw_example)
+```
+
+## Clean
+
+Pivot the data to longer format and then split the column names into the data they contain: water type, crop, and year
+
+```{r}
+gwa_example |> 
+  pivot_longer(-GEOID, 
+               names_to = c("measure", "crop", "year"), 
+               names_sep = "\\.")
+```
+
+```{r}
+gwd_example |> 
+  pivot_longer(-GEOID, 
+               names_to = c("measure", "crop", "year"), 
+               names_sep = "\\.")
+```
+
+## Combine data
+
+This data isn't "tidy", meaning it has information baked into column names that should* be in rows: the crop, year, and water use measure.
+
+
+
+```{r}
+gwa_files = str_subset(data_files, "gwa")
+gwd_files = str_subset(data_files, "gwd")
+sw_files = str_subset(data_files, "sw")
+
+gwa_all = map(gwa_files, read_csv, col_types = "innnnnnnnnnnnnnnnnnnn", show_col_types = F) |> 
+  map(pivot_longer, -GEOID, names_to = c(".value", "crop", "year"), names_sep = "\\.") |> 
+  list_rbind() |> 
+  # Trim leading zeroes in GEO_ID
+  mutate(GEOID = str_remove_all(GEOID, "^0"))
+
+gwd_all = map(gwd_files, read_csv, col_types = "innnnnnnnnnnnnnnnnnnn", show_col_types = F) |> 
+  map(pivot_longer, -GEOID, names_to = c(".value", "crop", "year"), names_sep = "\\.") |> 
+  list_rbind() |> 
+  # Trim leading zeroes in GEO_ID
+  mutate(GEOID = str_remove_all(GEOID, "^0"))
+
+sw_all = map(sw_files, read_csv, col_types = "innnnnnnnnnnnnnnnnnnn", show_col_types = F) |> 
+  map(pivot_longer, -GEOID, names_to = c(".value", "crop", "year"), names_sep = "\\.") |> 
+  list_rbind() |> 
+  # Trim leading zeroes in GEO_ID
+  mutate(GEOID = str_remove_all(GEOID, "^0"))
+
+glimpse(gwa_all)
+```
+
+Combine files
+
+```{r}
+irrigation = list(
+  gwa_all, gwd_all, sw_all
+) |> 
+  reduce(full_join, by = c("GEOID", "crop", "year")) |> 
+  select(crop, year, GEOID, sw, gwa, gwd)
+
+glimpse(irrigation)
+
+
+```
+
+```{r}
+skim(irrigation)
+```
+
+What are GWA, GWD, and SW measured in? km^3
+
+```{r}
+irrigation2 = map(data_files, read_csv, col_types = "cnnnnnnnnnnnnnnnnnnnn", show_col_types = F) |> 
+  map(mutate, GEOID = str_pad(GEOID, pad = "0", width = 5, side = "left"))  |> 
+    map(pivot_longer, -GEOID, 
+        names_to = c("measure", "crop", "year"), 
+        names_sep = "\\.", 
+        names_transform = list(year = ~as.integer(.))) |> 
+  list_rbind() |> 
+  pivot_wider(names_from = measure, values_from = value) |> 
+    select(crop, year, GEOID, sw, gwa, gwd) |> 
+  mutate(gww_sus = gwa - gwd)
+
+summary(irrigation2)
+```
+
+
+
+# Summary
+
+Water use measures by year
+
+```{r}
+(iwu_by_year = irrigation2 |> 
+  group_by(year) |> 
+  summarise(across(where(is_double),sum)))
+```
+
+Avg annual IWU
+
+```{r}
+iwu_by_year |> 
+  summarise(across(where(is_double), \(x) mean(x, na.rm=T)))
+```
+
+Water use measures by crop and year
+
+```{r}
+(iwu_by_cropyear = irrigation2 |> 
+  group_by(year, crop) |> 
+  summarise(across(where(is_double),sum)) |> 
+   ungroup())
+```
+
+Avg. Annual IWU, by crop
+
+```{r}
+
+avg_annual_iwu = iwu_by_cropyear |> 
+  group_by(crop) |> 
+  summarise(across(where(is_double), \(x) mean(x, na.rm=T)))|> 
+  mutate(across(where(is_double), \(x) round(x, 2))) # |>
+  # mutate(across(where(is_double), \(x) scales::percent(x/sum(x))))
+
+avg_annual_iwu
+```
+
+But the values for surface water withdrawals in the paper describing this data differ from these...
+
+```{r}
+annual_avg_crop_sww = tribble(
+  ~crop, ~sw_table,
+  "barley", 3.05,
+  "corn", 5.79,
+  "cotton",  1.76,
+  "millet", .06,
+  "oats", .66,
+  "other_sctg2", .59,
+  "other_sctg3", 9.39,
+  "other_sctg4", 32.93,
+  "peanuts", .06,
+  "potatoes", 1.03,
+  "pulses", .58,
+  "rapeseed", .03,
+  "rice", 2.73,
+  "rye", .08,
+  "sorghum", .39,
+  "soybeans", .38,
+  "sugarbeets", .41,
+  "sunflower", .08,
+  "sweetpotatoes", .01,
+  "wheat", 7.35
+)
+
+avg_annual_iwu |> 
+  select(crop, sw) |> 
+  left_join(annual_avg_crop_sww, by = "crop") |> 
+  mutate(diff = sw - sw_table)
+```
+
+Top water usage by crop in 2020
+
+```{r}
+top_crop_2020 = iwu_by_cropyear |> 
+  filter(year == 2020) |> 
+  arrange(desc(gwa)) |> 
+  mutate(crop_rank_2020 = rank(desc(gwa))) |> 
+  select(starts_with("crop"))
+```
+
+
+## Crop Water Usage over Time
+
+```{r}
+crop_pal = c("barley", "corn", "cotton", "Other", "Other Animal Feed", "Other Produce", "rice", "wheat")
+
+iwu_by_cropyear |> 
+  left_join(top_crop_2020, by = "crop") |> 
+  mutate(crop = case_when(crop == "other_sctg2" ~ "Other Grains",
+                          crop == "other_sctg3" ~ "Other Produce",
+                          crop == "other_sctg4" ~ "Other Animal Feed",
+                          T ~ crop),
+         crop_cat = if_else(crop_rank_2020 < 8, crop, "Other")) |> 
+  ggplot(aes(x = year, y = gwa))+
+  geom_line(aes(group = crop, colour = crop_cat, alpha = (crop_cat != "Other")))+
+  scale_colour_manual(values = )+
+  scale_col
+  theme_minimal()
+```
+
