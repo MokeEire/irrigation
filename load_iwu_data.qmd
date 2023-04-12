@@ -1,185 +1,186 @@
 ---
 title: "Combine Irrigation Data"
 author: "Mark Barrett"
-format: html
+format: 
+  html:
+    df-print: paged
+    self-contained: true
+    toc: true
+    theme: 
+      light: flatly
+      dark: darkly
 ---
 
 # Libraries
 
 ```{r}
+#| label: setup
+#| message: false
+#| warning: false
 library(tidyverse)
 library(here)
 library(skimr)
 ```
+
 # Data
 
-Downloaded all files from the [Illinois Data Bank](https://doi.org/10.13012/B2IDB-4607538_V1).
-Select all files, click *Get Custom Zip and Download Link for Selected*, unzip the file and copy all the csv files into a folder named `data`. I put the files in a subfolder named `raw` because I expect I will want to output a processed file and it's useful to differentiate earlier on. 
+I downloaded the files from [Illinois Data Bank](https://doi.org/10.13012/B2IDB-4607538_V1).
+To follow along and copy my file organization, select all files, click *Get Custom Zip and Download Link for Selected*, unzip the file and move the csv files into a folder named `data`. I actually put the files in a subfolder named `raw` because I will want to output a processed data file and it's useful to separate raw and processed data. You can leave this step out and remove the second argument (`"raw"`) in the `here()` function below.
 
 ```{r}
 data_folder = here("data", "raw")
+# List the files in our data folder
 (data_files = list.files(data_folder, full.names = T))
 ```
 
-## Load
+## Examples
 
-Read one file in for each data type.
+Read in the 2020 file in for each data type.
+
+```{r}
+gwa_example_file = str_subset(data_files, "gwa_2020")
+gwd_example_file = str_subset(data_files, "gwd_2020")
+sw_example_file = str_subset(data_files, "sw_2020")
+
+example_files = list(
+  gwa_example_file, gwd_example_file, sw_example_file
+  )
+```
+
 
 According to the readme:
 
 >All csv files in this folder specify the type of water: where GWA is Groundwater Abstractions, GWD is Groundwater Depletion, and SW is Surface water Withdrawals; followed by the year, ranging from 2008 to 2020. 
 
-```{r}
-gwa_example = str_subset(data_files, "gwa") |> 
-  sample(1) |> 
-  read_csv()
+### Cleaning
 
-glimpse(gwa_example)
+In each case, I specify the column types to ensure the data types are consistent.
+I noticed FIPS codes (`GEOID`) were not being read in consistently across each file. 
+Some have leading zeroes for a number of counties which results in the data being read in as 4 digits instead of 5.
+To ensure the codes are consistent across all files, I pad the string up to 5 characters with 0s using `str_pad()`.
+
+```{r}
+(examples_clean = map(example_files, read_csv, 
+                      show_col_types = F, col_types = "cdddddddddddddddddddd") |> 
+    # Pad FIPs codes
+    map(mutate, GEOID = str_pad(GEOID, pad = "0", width = 5, side = "left")))
+
+
 ```
 
-```{r}
-gwd_example = str_subset(data_files, "gwd") |> 
-  sample(1) |> 
-  read_csv()
+### Pivot long and wide
 
-glimpse(gwd_example)
-```
+This data isn't "tidy", meaning it has information baked into column names that should\* be in rows: crop, year, and water use measure.
+To tidy this dataset such that we have crop and year in their own columns and the different measures either in a `measure` column, pivot the data to longer format and split the columns into the data contained in their name: water type, crop, and year. 
 
 ```{r}
-sw_example = str_subset(data_files, "sw") |> 
-  sample(1) |> 
-  read_csv()
-
-glimpse(sw_example)
-```
-
-## Clean
-
-Pivot the data to longer format and then split the column names into the data they contain: water type, crop, and year
-
-```{r}
-gwa_example |> 
-  pivot_longer(-GEOID, 
+examples_wide_list = examples_clean |> 
+  map(pivot_longer, -GEOID, 
                names_to = c("measure", "crop", "year"), 
                names_sep = "\\.")
+
+(examples_long_df = list_rbind(examples_wide_list))
+
 ```
+
+This kind of format is useful when we want to compare measures as different colours in ggplot. 
+Often it's more valuable for performing calculations to have the different measures in their own column.
+To achieve this, we pivot multiple measures wider.
 
 ```{r}
-gwd_example |> 
-  pivot_longer(-GEOID, 
-               names_to = c("measure", "crop", "year"), 
-               names_sep = "\\.")
+(examples_wide_df = pivot_wider(examples_long_df, 
+                                id_cols = c(GEOID, crop, year), 
+                                names_from = measure, values_from = value))
 ```
 
-## Combine data
 
-This data isn't "tidy", meaning it has information baked into column names that should* be in rows: the crop, year, and water use measure.
+## Load full data
 
+Now I'll repeat the steps used for the example files with the full data.
+Load, clean, and pivot the data to long format.
+
+```{r}
+(iwu_long = map(data_files, read_csv, 
+                      show_col_types = F, col_types = "cdddddddddddddddddddd") |> 
+    # Pad FIPs codes
+    map(mutate, GEOID = str_pad(GEOID, pad = "0", width = 5, side = "left")) |> 
+   # Pivot measures
+   map(pivot_longer, -GEOID, 
+       names_to = c("measure", "crop", "year"), 
+       names_sep = "\\.", 
+       names_transform = list(year = ~as.integer(.))) |> 
+   list_rbind()) |> 
+  glimpse()
+
+```
+
+Pivot the data out to wide format.
+
+```{r}
+(iwu_wide = iwu_long |> 
+  pivot_wider(names_from = measure, values_from = value) |>
+  select(year, GEOID, crop, sw, gwa, gwd) |> 
+    # Calculate Sustainable GWW/GWA
+    mutate(sus_gwa = gwa - gwd,
+           total = sw+gwa)) |> 
+  glimpse()
+```
 
 
 ```{r}
-gwa_files = str_subset(data_files, "gwa")
-gwd_files = str_subset(data_files, "gwd")
-sw_files = str_subset(data_files, "sw")
-
-gwa_all = map(gwa_files, read_csv, col_types = "innnnnnnnnnnnnnnnnnnn", show_col_types = F) |> 
-  map(pivot_longer, -GEOID, names_to = c(".value", "crop", "year"), names_sep = "\\.") |> 
-  list_rbind() |> 
-  # Trim leading zeroes in GEO_ID
-  mutate(GEOID = str_remove_all(GEOID, "^0"))
-
-gwd_all = map(gwd_files, read_csv, col_types = "innnnnnnnnnnnnnnnnnnn", show_col_types = F) |> 
-  map(pivot_longer, -GEOID, names_to = c(".value", "crop", "year"), names_sep = "\\.") |> 
-  list_rbind() |> 
-  # Trim leading zeroes in GEO_ID
-  mutate(GEOID = str_remove_all(GEOID, "^0"))
-
-sw_all = map(sw_files, read_csv, col_types = "innnnnnnnnnnnnnnnnnnn", show_col_types = F) |> 
-  map(pivot_longer, -GEOID, names_to = c(".value", "crop", "year"), names_sep = "\\.") |> 
-  list_rbind() |> 
-  # Trim leading zeroes in GEO_ID
-  mutate(GEOID = str_remove_all(GEOID, "^0"))
-
-glimpse(gwa_all)
+skim(iwu_wide)
 ```
 
-Combine files
+Join in state information based on the GEOID using the `fips_codes` dataset in `{tidycensus}`.
 
 ```{r}
-irrigation = list(
-  gwa_all, gwd_all, sw_all
-) |> 
-  reduce(full_join, by = c("GEOID", "crop", "year")) |> 
-  select(crop, year, GEOID, sw, gwa, gwd)
+library(tidycensus)
+data("fips_codes")
+fips_clean = fips_codes |> 
+  unite(col = fips, c(state_code, county_code), sep = "")
 
-glimpse(irrigation)
-
-
+iwu_wide_st = iwu_wide |> 
+  left_join(fips_clean, by = c("GEOID" = "fips"))
 ```
-
-```{r}
-skim(irrigation)
-```
-
-What are GWA, GWD, and SW measured in? km^3
-
-```{r}
-irrigation2 = map(data_files, read_csv, col_types = "cnnnnnnnnnnnnnnnnnnnn", show_col_types = F) |> 
-  map(mutate, GEOID = str_pad(GEOID, pad = "0", width = 5, side = "left"))  |> 
-    map(pivot_longer, -GEOID, 
-        names_to = c("measure", "crop", "year"), 
-        names_sep = "\\.", 
-        names_transform = list(year = ~as.integer(.))) |> 
-  list_rbind() |> 
-  pivot_wider(names_from = measure, values_from = value) |> 
-    select(crop, year, GEOID, sw, gwa, gwd) |> 
-  mutate(gww_sus = gwa - gwd)
-
-summary(irrigation2)
-```
-
 
 
 # Summary
 
-Water use measures by year
+Calculate annual total water use measures
 
 ```{r}
-(iwu_by_year = irrigation2 |> 
+(iwu_by_year = iwu_wide_st |> 
   group_by(year) |> 
   summarise(across(where(is_double),sum)))
 ```
 
-Avg annual IWU
+What is the yearly average for each IWU measure between 2008-2020?
 
 ```{r}
 iwu_by_year |> 
   summarise(across(where(is_double), \(x) mean(x, na.rm=T)))
 ```
 
-Water use measures by crop and year
+Calculate yearly crop IWUs
 
 ```{r}
-(iwu_by_cropyear = irrigation2 |> 
+(iwu_by_cropyear = iwu_wide |> 
   group_by(year, crop) |> 
   summarise(across(where(is_double),sum)) |> 
    ungroup())
 ```
 
-Avg. Annual IWU, by crop
+What is each crop's yearly average for the IWU measures between 2008-2020?
 
 ```{r}
 
-avg_annual_iwu = iwu_by_cropyear |> 
+(avg_annual_iwu = iwu_by_cropyear |> 
   group_by(crop) |> 
   summarise(across(where(is_double), \(x) mean(x, na.rm=T)))|> 
-  mutate(across(where(is_double), \(x) round(x, 2))) # |>
-  # mutate(across(where(is_double), \(x) scales::percent(x/sum(x))))
-
-avg_annual_iwu
+  mutate(across(where(is_double), \(x) round(x, 2))))
 ```
 
-But the values for surface water withdrawals in the paper describing this data differ from these...
+But the values I calculatefor surface water withdrawals differ from [Table 2 in the authors' paper describing this data](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2022WR032804#wrcr26385-tbl-0002)
 
 ```{r}
 annual_avg_crop_sww = tribble(
@@ -222,6 +223,62 @@ top_crop_2020 = iwu_by_cropyear |>
   select(starts_with("crop"))
 ```
 
+# Visualization Roughwork
+
+What % of total water use does groundwater supply? How does this compare to 1950?
+
+```{r}
+iwu_by_year |> 
+  mutate(gwa_pct = gwa/total) |> 
+  ggplot(aes(x = year, y = gwa_pct))+
+  geom_line()+
+  geom_hline(yintercept =.23, linetype = "dashed")+
+  scale_y_continuous(limits = c(0, NA), labels = scales::percent)+
+  theme_minimal()
+```
+
+Surface vs groundwater withdrawals as an area chart
+
+```{r}
+annual_iwu = iwu_long |> 
+  group_by(year, measure) |> 
+  summarise(value = sum(value), .groups = "drop") |> 
+  mutate(measure = factor(measure, levels = c("sw", "gwa", "gwd"), 
+                          labels = c("Surface", "Groundwater", "Groundwater Depletion")))
+
+annual_iwu_sus = iwu_wide |> 
+  pivot_longer(cols = c(sw, gwa, gwd, sus_gwa), names_to = "measure", values_to = "value") |> 
+  group_by(year, measure) |> 
+  summarise(value = sum(value), .groups = "drop") |> 
+  mutate(measure = factor(measure, levels = c("sw", "gwa", "sus_gwa", "gwd"), 
+                          labels = c("Surface Water Withdrawals", "Groundwater Withdrawals", str_wrap("Groundwater Withdrawals (Sustainable)", 32), "Groundwater Depletion")))
+
+# filter(annual_iwu_sus, measure != "Groundwater Withdrawals") |> 
+filter(annual_iwu, measure != "Groundwater Depletion") |> 
+  ggplot(aes(x = year, y = value))+
+  geom_area(aes(fill = measure), colour = "grey29", linewidth = .2, alpha = .9)+
+  # geom_line(data = filter(annual_iwu, measure == "Groundwater Withdrawals"), colour = "black")+
+  scale_x_continuous(name = NULL, breaks = scales::pretty_breaks(), expand = expansion())+
+  scale_y_continuous(name = "Irrigation Water Use (km^3)", expand = expansion())+
+  scale_fill_manual(name = NULL, values = c("mediumseagreen", "cornflowerblue", "orangered"))+
+  labs(title = "How much water is used to irrigate crops?", subtitle = "Surface and Groundwater Withdrawals for Irrigation Use, 2008-2020")+
+  theme_minimal()
+```
+How much of the groundwater withdrawals are sustainable vs depletion?
+
+```{r}
+filter(annual_iwu_sus, measure != "Groundwater Withdrawals") |> 
+  # mutate(value = if_else(measure == "Surface Water Withdrawals", value, -value)) |> 
+  ggplot(aes(x = year, y = value))+
+  geom_area(aes(fill = measure), colour = "grey29", linewidth = .2, alpha = .9)+
+  # geom_area(data = filter(annual_iwu, measure == "Groundwater Depletion"), alpha = .7, aes(fill = measure), linetype = "dashed")+
+  scale_x_continuous(name = NULL, breaks = scales::pretty_breaks(), expand = expansion(add = .5))+
+  scale_y_continuous(name = "Irrigation Water Use (km^3)", expand = expansion())+
+  # scale_colour_manual(name = NULL, values = "orangered")+
+  scale_fill_manual(name = NULL, values = c("mediumseagreen", "cornflowerblue", "orangered"))+
+  labs(title = "Agricultural Irrigation Water Use", subtitle = "Sources of Irrigation Water")+
+  theme_minimal()
+```
 
 ## Crop Water Usage over Time
 
@@ -237,8 +294,17 @@ iwu_by_cropyear |>
          crop_cat = if_else(crop_rank_2020 < 8, crop, "Other")) |> 
   ggplot(aes(x = year, y = gwa))+
   geom_line(aes(group = crop, colour = crop_cat, alpha = (crop_cat != "Other")))+
-  scale_colour_manual(values = )+
-  scale_col
+  # scale_colour_manual(values = )+
+  # scale_col
   theme_minimal()
+```
+
+## Irrigation by State
+
+```{r}
+iwu_wide_st |> 
+  group_by(state_name) |> 
+  summarise(across(where(is_double), sum)) |> 
+  arrange(state_name)
 ```
 
