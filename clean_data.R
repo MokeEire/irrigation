@@ -3,6 +3,7 @@
 
 library(tidyverse)
 library(here)
+library(tidycensus)
 
 
 # Load Data ---------------------------------------------------------------
@@ -29,14 +30,42 @@ iwu_df_list = map(data_files, read_csv, col_types = "cdddddddddddddddddddd", sho
   list_rbind()) |> 
   glimpse()
 
+
+
 # Wide: one row containing all measures per crop, county, year
-(iwu_wide = irrigation_long |> 
+(iwu_wide = iwu_long |> 
   # Pivot the measure names back out
   pivot_wider(names_from = measure, values_from = value) |> 
   # Reorder measures to match table in paper
   # https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2022WR032804#wrcr26385-tbl-0002
   select(year, GEOID, crop, sw, gwa, gwd)) |> 
   glimpse()
+
+
+# Check table -------------------------------------------------------------
+
+iwu_wide |> 
+  # Sum measures by year and crop
+  group_by(year, crop) |> 
+  summarise(across(where(is_double),sum)) |> 
+  # Calculate crop annual avg measures
+  group_by(crop) |> 
+  summarise(across(where(is_double), \(x) mean(x, na.rm=T)))|> 
+  mutate(across(where(is_double), \(x) round(x, 2)))
+
+
+# Join State Info ---------------------------------------------------------
+
+data("fips_codes")
+fips_clean = fips_codes |> 
+  # Combine codes to create FIPS code
+  unite(col = fips, c(state_code, county_code), sep = "")
+
+iwu_long_st = iwu_long |> 
+  left_join(fips_clean, by = c("GEOID" = "fips"))
+
+iwu_wide_st = iwu_wide |> 
+  left_join(fips_clean, by = c("GEOID" = "fips"))
 
 
 # Write Output ------------------------------------------------------------
