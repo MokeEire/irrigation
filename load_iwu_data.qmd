@@ -20,6 +20,7 @@ format:
 library(tidyverse)
 library(here)
 library(skimr)
+library(mokeR)
 ```
 
 # Data
@@ -146,10 +147,36 @@ iwu_wide_st = iwu_wide |>
 
 # Summary
 
-Calculate annual total water use measures
+## Annual Irrigation levels, by Source
 
 ```{r}
-(iwu_by_year = iwu_wide_st |> 
+annual_iwu = iwu_long |> 
+  group_by(year, measure) |> 
+  summarise(value = sum(value), .groups = "drop") |> 
+  mutate(measure = factor(measure, levels = c("sw", "gwa", "gwd"), 
+                          labels = c("Surface", "Groundwater", "Groundwater Depletion")))
+
+# filter(annual_iwu_sus, measure != "Groundwater Withdrawals") |> 
+filter(annual_iwu, measure != "Groundwater Depletion") |> 
+  ggplot(aes(x = year, y = value))+
+  geom_area(aes(fill = measure), colour = "grey29", linewidth = .2, alpha = .98, show.legend = F)+
+  # geom_line(data = filter(annual_iwu, measure == "Groundwater Withdrawals"), colour = "black")+
+  scale_x_continuous(name = NULL, breaks = scales::pretty_breaks(), expand = expansion(mult = c(0, .025)))+
+  scale_y_continuous(name = "Irrigation Water Use (km^3)", breaks = scales::pretty_breaks(n = 6), expand = expansion(mult = c(0, .15)))+
+  scale_fill_manual(name = NULL, values = c("mediumseagreen", "cornflowerblue", "orangered"))+
+  labs(title = "How much water is used to irrigate crops?", 
+       subtitle = "Surface and Groundwater Withdrawals for Irrigation Use, 2008-2020",
+       caption = source_caption("Ruess, P.J., Konar, M., Wanders, N. , & Bierkens, M. (2023)"))+
+  annotate("text", x = 2014, y = 75, label = "Surface", colour = "#FFFFFF", size = 5, )+
+  annotate("text", x = 2014, y = 25, label = "Groundwater", colour = "#FFFFFF", size = 5)+
+  theme_moke(plots_pane = T)
+```
+
+
+Based on these data, how much water are used for irrigating crops each year?
+
+```{r}
+(iwu_total_annual = iwu_wide_st |> 
   group_by(year) |> 
   summarise(across(where(is_double),sum)))
 ```
@@ -157,9 +184,10 @@ Calculate annual total water use measures
 What is the yearly average for each IWU measure between 2008-2020?
 
 ```{r}
-iwu_by_year |> 
+iwu_total_annual |> 
   summarise(across(where(is_double), \(x) mean(x, na.rm=T)))
 ```
+
 
 Calculate yearly crop IWUs
 
@@ -228,7 +256,7 @@ top_crop_2020 = iwu_by_cropyear |>
 What % of total water use does groundwater supply? How does this compare to 1950?
 
 ```{r}
-iwu_by_year |> 
+iwu_total_annual |> 
   mutate(gwa_pct = gwa/total) |> 
   ggplot(aes(x = year, y = gwa_pct))+
   geom_line()+
@@ -240,12 +268,6 @@ iwu_by_year |>
 Surface vs groundwater withdrawals as an area chart
 
 ```{r}
-annual_iwu = iwu_long |> 
-  group_by(year, measure) |> 
-  summarise(value = sum(value), .groups = "drop") |> 
-  mutate(measure = factor(measure, levels = c("sw", "gwa", "gwd"), 
-                          labels = c("Surface", "Groundwater", "Groundwater Depletion")))
-
 annual_iwu_sus = iwu_wide |> 
   pivot_longer(cols = c(sw, gwa, gwd, sus_gwa), names_to = "measure", values_to = "value") |> 
   group_by(year, measure) |> 
@@ -253,16 +275,7 @@ annual_iwu_sus = iwu_wide |>
   mutate(measure = factor(measure, levels = c("sw", "gwa", "sus_gwa", "gwd"), 
                           labels = c("Surface Water Withdrawals", "Groundwater Withdrawals", str_wrap("Groundwater Withdrawals (Sustainable)", 32), "Groundwater Depletion")))
 
-# filter(annual_iwu_sus, measure != "Groundwater Withdrawals") |> 
-filter(annual_iwu, measure != "Groundwater Depletion") |> 
-  ggplot(aes(x = year, y = value))+
-  geom_area(aes(fill = measure), colour = "grey29", linewidth = .2, alpha = .9)+
-  # geom_line(data = filter(annual_iwu, measure == "Groundwater Withdrawals"), colour = "black")+
-  scale_x_continuous(name = NULL, breaks = scales::pretty_breaks(), expand = expansion())+
-  scale_y_continuous(name = "Irrigation Water Use (km^3)", expand = expansion())+
-  scale_fill_manual(name = NULL, values = c("mediumseagreen", "cornflowerblue", "orangered"))+
-  labs(title = "How much water is used to irrigate crops?", subtitle = "Surface and Groundwater Withdrawals for Irrigation Use, 2008-2020")+
-  theme_minimal()
+
 ```
 How much of the groundwater withdrawals are sustainable vs depletion?
 
