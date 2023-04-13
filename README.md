@@ -1,7 +1,7 @@
 # Aim
 Explore, process, and visualize estimated irrigation water-use by crop data from the [Illinois Data Bank](https://doi.org/10.13012/B2IDB-4607538_V1).
 
-The resulting processed data is used in this [Tableau dashboard](https://public.tableau.com/app/profile/mokeeire/viz/USIrrigationWaterUsedforAgriculture/AnnualCropIrrigationbyState).
+The resulting processed data is used in [this Tableau dashboard](https://public.tableau.com/app/profile/mokeeire/viz/USIrrigationWaterUsedforAgriculture/AnnualCropIrrigationbyState).
 
 # References
 
