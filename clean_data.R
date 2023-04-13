@@ -71,5 +71,5 @@ iwu_wide_st = iwu_wide |>
 # Write Output ------------------------------------------------------------
 
 
-write_csv(iwu_long, here("data", "processed", "iwu_full_long.csv"))
-write_csv(iwu_wide, here("data", "processed", "iwu_full_wide.csv"))
+write_csv(iwu_long_st, here("data", "processed", "iwu_full_long.csv"))
+write_csv(iwu_wide_st, here("data", "processed", "iwu_full_wide.csv"))
