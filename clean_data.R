@@ -60,7 +60,7 @@ cli::cli_progress_message("IWU and USGS data loaded")
 #' @export
 #'
 #' @examples
-mgal_to_km3 = function(x){
+mgal_day_to_km3_yr = function(x){
   # Multiple by days to get gallons/year
   mgal_year = x*365.25
   # Multiply by 0.0000037854118 because this is the conversion factor for mgal to km^3?
@@ -93,7 +93,7 @@ usgs_iwu_wide = usgs_iwu_long |>
                                                                           "Mining", "Thermoelectric", "Thermoelectric (Once-through)", 
                                                                           "Thermoelectric (Recirculating)", "Total")))) |> 
   # Convert estimates
-  mutate(across(-c(state:category), mgal_to_km3))
+  mutate(across(-c(state:category), mgal_day_to_km3_yr))
 
 
 # Check table -------------------------------------------------------------

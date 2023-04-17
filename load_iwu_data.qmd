@@ -192,7 +192,7 @@ Let's see if we can convert this to km^3 per year.
 
 ```{r}
 
-mgal_to_km3 = function(x){
+mgal_day_to_km3_yr = function(x){
   # Multiple by days to get gallons/year
   mgal_year = x*365.25
   # Multiply by 0.0000037854118 because this is the conversion factor for mgal to km^3?
@@ -201,7 +201,7 @@ mgal_to_km3 = function(x){
 usgs_iwu_wide |> 
   # filter(category == "Crop Irrigation") |> 
   group_by(category) |> 
-  # mutate(across(-c(state:year), mgal_to_km3)) |>
+  # mutate(across(-c(state:year), mgal_day_to_km3_yr)) |>
   summarise(across(-c(state:year), \(x) sum(x, na.rm=T)))
 
 
