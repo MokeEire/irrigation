@@ -4,6 +4,7 @@
 library(tidyverse)
 library(here)
 library(tidycensus)
+library(janitor)
 
 
 # Load Data ---------------------------------------------------------------
